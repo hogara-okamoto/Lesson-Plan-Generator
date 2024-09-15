@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenAI Lesson Plan Generator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        .container {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .input-section {
+            flex-basis: 45%;
+        }
+
+        .output-section {
+            flex-basis: 45%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            background-color: #f9f9f9;
+            height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+
+        input, textarea {
+            display: block;
+            margin-bottom: 10px;
+            padding: 10px;
+            width: 100%;
+        }
+
+        button {
+            padding: 10px 20px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #218838;
+        }
+
+        h1 {
+            margin-bottom: 20px;
+        }
+
+        .radio-group {
+            margin-bottom: 15px;
+        }
+
+        .radio-group label {
+            margin-right: 20px;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .follow-up {
+            display: none;
+            margin-top: 20px;
+        }
+
+    </style>
+</head>
+<body>
+
+    <h1>English Class Lesson Plan Generator</h1>
+
+    <div class="container">
+        <div class="input-section">
+            <label for="ageGroup">Student Age Group:</label>
+            <input type="text" id="ageGroup" placeholder="e.g., 12-13">
+
+            <label for="lessonDuration">Lesson Duration (minutes):</label>
+            <input type="text" id="lessonDuration" placeholder="e.g., 50">
+
+            <div class="radio-group">
+                <label>Lesson Focus:</label>
+                <label><input type="radio" name="lessonFocus" value="Listening"> Listening</label>
+                <label><input type="radio" name="lessonFocus" value="Speaking"> Speaking</label>
+                <label><input type="radio" name="lessonFocus" value="Reading"> Reading</label>
+                <label><input type="radio" name="lessonFocus" value="Writing"> Writing</label>
+            </div>
+
+            <div class="radio-group">
+                <label>System:</label>
+                <label><input type="radio" name="system" value="Lexis"> Lexis</label>
+                <label><input type="radio" name="system" value="Grammar"> Grammar</label>
+                <label><input type="radio" name="system" value="Phonology"> Phonology</label>
+                <label><input type="radio" name="system" value="Discourse"> Discourse</label>
+            </div>
+
+            <label for="level">Student Language Level:</label>
+            <input type="text" id="level" placeholder="e.g., mixed ability, beginner, intermediate">
+
+            <button id="generateButton">Generate Lesson Plan</button>
+        </div>
+
+        <div class="output-section" id="output">
+        </div>
+    </div>
+
+    <div class="follow-up" id="followUpSection">
+        <h2>Ask a follow-up question:</h2>
+        <textarea id="followUpInput" rows="3" placeholder="Enter your additional question or request here..."></textarea>
+        <button id="followUpButton">Send Follow-up</button>
+    </div>
+
+    <script>
+        let generatedLessonPlan = '';
+
+        async function fetchStream(bodyContent, outputElement) {
+            let fullResponse = ""; // fullResponse を初期化
+
+            try {
+                console.log('Sending request to teacher-assistant.php...'); // デバッグ
+                // Fetchリクエストを送信
+                const response = await fetch('teacher-assistant.php', { 
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(bodyContent)
+                });
+
+                console.log('Response received:', response);  // レスポンスを確認
+
+                // HTTPステータスコードが200-299でない場合はエラーを投げる
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                console.log('Starting to read stream...'); // ストリーミング開始を確認
+
+                // ストリーミングレスポンスを取得
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let done = false;
+                let partialChunk = "";  // 部分的なデータを保持する変数
+
+                // ストリームからデータを継続的に読み取る
+                while (!done) {
+                    const { value, done: readerDone } = await reader.read();
+                    done = readerDone;
+
+                    // チャンクをデコード
+                    const chunk = decoder.decode(value, { stream: true });
+                    partialChunk += chunk;  // 受信したデータを追加
+
+                    console.log("Received chunk:", chunk);
+
+                    // 行ごとにデータを分割する
+                    const lines = partialChunk.split('\n');
+
+                    // 各行を処理
+                    for (let i = 0; i < lines.length - 1; i++) {
+                        const line = lines[i];
+
+                        if (line.trim() === '') {
+                            continue;  // 空行は無視
+                        }
+
+                        // "data:" で始まる行のみ処理
+                        if (line.startsWith('data:')) {
+                            const jsonStr = line.replace('data:', '').trim();
+
+                            // ストリーム終了信号 ([DONE]) の確認
+                            if (jsonStr === '[DONE]') {
+                                done = true;
+                                break;
+                            }
+
+                            // JSONをパースしてデータを抽出
+                            try {
+                                const parsed = JSON.parse(jsonStr);
+                                const content = parsed.choices[0].delta.content || '';
+
+                                // 出力をリアルタイムに更新
+                                fullResponse += content;
+                                outputElement.innerText += content;
+                            } catch (error) {
+                                console.error("Error parsing JSON", error);
+                                outputElement.innerText = `Error: ${error.message}`;
+                                // 不完全なJSONが受信された場合、次のチャンクで完成する可能性があるので続行
+                                continue;
+                            }
+                        }
+                    }
+                    // 最後の行がまだ不完全な場合、partialChunkに残して次のチャンクと結合
+                    partialChunk = lines[lines.length - 1];
+                }
+
+                // ストリーミングが終了したらフルレスポンスを返す
+                return fullResponse;
+
+            } catch (error) {
+                console.error('Fetch error:', error);
+                outputElement.innerText = `Error: ${error.message}`;
+                return fullResponse; // エラー時でも蓄積した内容を返す
+            }
+        }
+
+        document.getElementById('generateButton').addEventListener('click', async () => {
+            // Get input values
+            const ageGroup = document.getElementById('ageGroup').value;
+            const lessonDuration = document.getElementById('lessonDuration').value;
+            const lessonFocus = document.querySelector('input[name="lessonFocus"]:checked')?.value || ''; // Get selected radio button
+            const system = document.querySelector('input[name="system"]:checked')?.value || ''; // Get selected radio button
+            const level = document.getElementById('level').value;
+
+            // Combine inputs into one message
+            const messageContent = `I want to make a lesson plan for an English class in the following conditions: Age group: ${ageGroup}, Lesson duration: ${lessonDuration} minutes, Skill: ${lessonFocus}, System: ${system}, Student level: ${level}. Please suggest a detailed plan including objectives, activities, and materials.`;
+
+            // Prepare the message for the OpenAI API
+            const messages = [
+                { role: "system", content: "You are an expert in lesson planning for language teachers." },
+                { role: "user", content: messageContent }
+            ];
+
+            // Clear the output div for new content
+            const outputElement = document.getElementById('output');
+            outputElement.innerText = "Generating lesson plan...\n.............................................\n\n";
+
+            const bodyContent = {
+                model: "gpt-4",
+                messages: messages,
+                stream: true // Enable streaming in OpenAI's API
+            };
+
+            console.log('Sending request...');  // デバッグ用ログ
+
+            // Fetch and stream the output
+            await fetchStream(bodyContent, outputElement);
+
+            // Clear input fields after the output is generated
+            document.getElementById('ageGroup').value = '';
+            document.getElementById('lessonDuration').value = '';
+            document.querySelectorAll('input[name="lessonFocus"]').forEach(el => el.checked = false);
+            document.querySelectorAll('input[name="system"]').forEach(el => el.checked = false);
+            document.getElementById('level').value = '';
+
+            // Show the follow-up section after the lesson plan is generated
+            document.getElementById('followUpSection').style.display = 'block';
+        });
+
+        // Handle follow-up requests
+        document.getElementById('followUpButton').addEventListener('click', async () => {
+            console.log("Follow-up button clicked");
+
+            const followUpQuestion = document.getElementById('followUpInput').value;
+
+            if (!followUpQuestion) {
+                alert("Please enter a follow-up question.");
+                return;
+            }
+
+            // Prepare the follow-up message with the previous lesson plan context
+            const followUpMessages = [
+                { role: "system", content: "You are an expert in lesson planning for language teachers." },
+                { role: "user", content: `Here is a previously generated lesson plan:\n${generatedLessonPlan}` },
+                { role: "user", content: `Follow-up question: ${followUpQuestion}` }
+            ];
+
+            console.log("Prepared follow-up messages:", followUpMessages);
+
+            // Clear the output div for new content
+            const outputElement = document.getElementById('output');
+            outputElement.innerText += "\n\nGenerating follow-up response...\n.............................................\n\n";
+
+            const apiUrl = "teacher-assistant.php";
+            const bodyContent = {
+                model: "gpt-4",
+                messages: followUpMessages,
+                stream: true // Enable streaming in OpenAI's API
+            };
+
+            console.log("Sending request with body:", bodyContent);
+
+            // Fetch and stream the follow-up response
+            console.log("Sending follow-up request:", bodyContent);  // リクエストデータを確認
+            await fetchStream(bodyContent, outputElement).catch(error => {
+                console.error("Error fetching follow-up response:", error);
+                outputElement.innerText += `Error fetching follow-up response: ${error.message}`;
+            });
+
+            // Clear follow-up input field
+            document.getElementById('followUpInput').value = '';
+        });
+    </script>
+
+</body>
+</html>
