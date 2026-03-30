@@ -35,7 +35,7 @@ if (!isset($data['model'])) {
 error_log("Sending request to OpenAI API with data: " . json_encode($data));
 
 // APIリクエストを行う
-$apiUrl = 'https://api.openai.com/v1/chat/completions'; // OpenAIのAPIエンドポイント
+$apiUrl = 'https://api.openai.com/v1/responses'; // OpenAIのAPIエンドポイント
 $headers = [
     'Authorization: Bearer ' . _AUTHO_KEY,
     'Content-Type: application/json'
